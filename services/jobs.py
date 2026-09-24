@@ -5,7 +5,6 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -18,12 +17,11 @@ from services.notifier import format_report, send_report
 from storage.repository import Repository, SecretValues
 
 logger = logging.getLogger(__name__)
-MSK = ZoneInfo("Europe/Moscow")
 DELIVERY_KEY_MAX_LENGTH = 40
 
 
-def new_manual_delivery_key() -> str:
-    key = f"manual:{uuid.uuid4().hex}"
+def new_delivery_key(kind: str) -> str:
+    key = f"{kind}:{uuid.uuid4().hex}"
     assert len(key) <= DELIVERY_KEY_MAX_LENGTH
     return key
 
@@ -44,15 +42,13 @@ class JobService:
     async def _secrets(self) -> SecretValues:
         return await self.repository.get_secrets()
 
-    async def run_scheduled(self, now: datetime | None = None) -> JobResult:
+    async def run_scheduled(self) -> JobResult:
         async with self.repository.job_lock() as acquired:
             if not acquired:
                 return JobResult("busy", "another rate check is already running")
-            local = (now or datetime.now(UTC)).astimezone(MSK)
-            hour_key = local.strftime("%Y-%m-%dT%H:00%z")
-            run_id = await self.repository.claim_delivery(hour_key, self.config.telegram_group_id)
-            if run_id is None:
-                return JobResult("duplicate", "this hourly window was already claimed")
+            key = new_delivery_key("cron")
+            run_id = await self.repository.claim_delivery(key, self.config.telegram_group_id)
+            assert run_id is not None
             return await self._execute(run_id, notify_admin=True)
 
     async def run_manual(self) -> JobResult:
@@ -70,7 +66,7 @@ class JobService:
                     wait = int(self.config.check_cooldown_seconds - elapsed) + 1
                     return JobResult("rate_limited", f"Повторите через {wait} сек.")
             await self.repository.mark_check()
-            key = new_manual_delivery_key()
+            key = new_delivery_key("manual")
             run_id = await self.repository.claim_delivery(key, self.config.telegram_group_id)
             assert run_id is not None
             return await self._execute(run_id, notify_admin=False)

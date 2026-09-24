@@ -22,7 +22,7 @@ async def scheduler_loop() -> None:
         if now.minute == 2 and tick != last_tick:
             last_tick = tick
             try:
-                await runtime.jobs.run_scheduled(now)
+                await runtime.jobs.run_scheduled()
             except Exception:
                 logger.exception("Local scheduler iteration failed")
         await asyncio.sleep(10)
