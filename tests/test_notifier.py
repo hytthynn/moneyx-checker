@@ -75,8 +75,15 @@ def test_only_visible_increases_are_reported():
     assert [(i.currency, i.network) for i in increases] == [("TON", "TON")]
 
     text = plain("\n".join(increases_html(increases, NOW)))
-    assert "TON (TON) — 128.415 ₽ (+1.215)" in text
+    assert "TON (TON) — 128.415 ₽ (+1.215 · +0.96%)" in text
     assert "USDT" not in text
+
+
+def test_percent_increase_is_unavailable_when_previous_rate_is_zero():
+    batch = RateBatch(rates=[rate("TON", "TON", "1.000")])
+    increases = find_increases(batch, {("TON", "TON"): Decimal("0")})
+
+    assert "+1.000 · н/д" in plain("".join(increases_html(increases, NOW)))
 
 
 @pytest.mark.asyncio

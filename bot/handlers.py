@@ -120,12 +120,26 @@ async def edit_panel(
 
 
 def build_router(repository: Repository, config: Settings, jobs: JobService) -> Router:
-    router = Router(name="admin_menu")
-    router.message.filter(F.chat.type == ChatType.PRIVATE)
-    router.callback_query.filter(F.message.chat.type == ChatType.PRIVATE)
+    router = Router(name="bot")
+    private_router = Router(name="admin_menu")
+    private_router.message.filter(F.chat.type == ChatType.PRIVATE)
+    private_router.callback_query.filter(F.message.chat.type == ChatType.PRIVATE)
     admin = IsAdmin(config.admin_telegram_id)
 
-    @router.message(Command("start"), admin)
+    @router.message(F.chat.id == config.telegram_group_id)
+    async def delete_user_message(message: Message) -> None:
+        from_user = message.from_user
+        anonymous_admin = bool(
+            message.sender_chat and message.sender_chat.id == message.chat.id
+        )
+        if not anonymous_admin and (not from_user or from_user.is_bot):
+            return
+        try:
+            await message.delete()
+        except TelegramAPIError as exc:
+            logger.warning("Could not delete a user message in the group: %s", redact(exc))
+
+    @private_router.message(Command("start"), admin)
     async def start(message: Message) -> None:
         await repository.clear_pending(config.admin_telegram_id)
         await message.answer(main_text(), parse_mode=ParseMode.HTML, reply_markup=MAIN_KEYBOARD)
@@ -134,14 +148,14 @@ def build_router(repository: Repository, config: Settings, jobs: JobService) -> 
         except TelegramAPIError:
             logger.warning("Could not delete the /start message")
 
-    @router.callback_query(F.data == "menu:home", admin)
+    @private_router.callback_query(F.data == "menu:home", admin)
     async def home(callback: CallbackQuery) -> None:
         await repository.clear_pending(config.admin_telegram_id)
         await callback.answer()
         if isinstance(callback.message, Message):
             await edit_message(callback.message, main_text(), MAIN_KEYBOARD)
 
-    @router.callback_query(F.data == "menu:status", admin)
+    @private_router.callback_query(F.data == "menu:status", admin)
     async def status(callback: CallbackQuery) -> None:
         await callback.answer()
         if not isinstance(callback.message, Message):
@@ -154,14 +168,14 @@ def build_router(repository: Repository, config: Settings, jobs: JobService) -> 
             BACK_KEYBOARD,
         )
 
-    @router.callback_query(F.data == "menu:check", admin)
+    @private_router.callback_query(F.data == "menu:check", admin)
     async def check(callback: CallbackQuery) -> None:
         await callback.answer()
         result = await jobs.run_manual()
         if result.status != "sent":
             logger.info("Manual rate check did not send: %s", redact(result.detail))
 
-    @router.callback_query(F.data == "menu:domain", admin)
+    @private_router.callback_query(F.data == "menu:domain", admin)
     async def domain(callback: CallbackQuery) -> None:
         if not isinstance(callback.message, Message):
             await callback.answer()
@@ -179,7 +193,7 @@ def build_router(repository: Repository, config: Settings, jobs: JobService) -> 
             CANCEL_KEYBOARD,
         )
 
-    @router.callback_query(F.data == "menu:auth", admin)
+    @private_router.callback_query(F.data == "menu:auth", admin)
     async def auth(callback: CallbackQuery) -> None:
         if not isinstance(callback.message, Message):
             await callback.answer()
@@ -197,14 +211,14 @@ def build_router(repository: Repository, config: Settings, jobs: JobService) -> 
             CANCEL_KEYBOARD,
         )
 
-    @router.callback_query(F.data == "menu:cancel", admin)
+    @private_router.callback_query(F.data == "menu:cancel", admin)
     async def cancel(callback: CallbackQuery) -> None:
         await repository.clear_pending(config.admin_telegram_id)
         await callback.answer("Ввод отменён")
         if isinstance(callback.message, Message):
             await edit_message(callback.message, main_text(), MAIN_KEYBOARD)
 
-    @router.message(admin)
+    @private_router.message(admin)
     async def input_message(message: Message) -> None:
         pending = await repository.pop_pending(config.admin_telegram_id)
         try:
@@ -297,8 +311,9 @@ def build_router(repository: Repository, config: Settings, jobs: JobService) -> 
                 markup = BACK_KEYBOARD
             await edit_panel(message, panel_id, text, markup)
 
-    @router.callback_query()
+    @private_router.callback_query()
     async def denied_callback(callback: CallbackQuery) -> None:
         await callback.answer("Недоступно")
 
+    router.include_router(private_router)
     return router

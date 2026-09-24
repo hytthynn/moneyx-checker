@@ -81,11 +81,19 @@ def find_increases(
 def increases_html(increases: list[RateIncrease], now: datetime | None = None) -> list[str]:
     local_now = (now or datetime.now(MSK)).astimezone(MSK)
     lines = ["📈 <b>Курс вырос</b>", ""]
-    lines.extend(
-        f"{_pair_html(item.currency, item.network)} — <code>{item.current:f}</code> ₽"
-        f" <i>(+{item.current - item.previous:f})</i>"
-        for item in increases
-    )
+    for item in increases:
+        previous = visible_rate(item.previous)
+        current = visible_rate(item.current)
+        difference = current - previous
+        percent = (
+            f"+{(difference / previous * 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):f}%"
+            if previous > 0
+            else "н/д"
+        )
+        lines.append(
+            f"{_pair_html(item.currency, item.network)} — <code>{current:f}</code> ₽"
+            f" <i>(+{difference:f} · {percent})</i>"
+        )
     lines.extend(["", f"🕒 {local_now:%d.%m.%Y %H:%M} MSK"])
     return split_lines(lines)
 

@@ -85,6 +85,54 @@ def callback_update(update_id, data):
     )
 
 
+def group_message_update(update_id, chat_id, *, is_bot=False, anonymous=False):
+    return Update.model_validate(
+        {
+            "update_id": update_id,
+            "message": {
+                "message_id": update_id,
+                "date": 0,
+                "chat": {"id": chat_id, "type": "supergroup", "title": "Rates"},
+                "from": {"id": 1087968824 if anonymous else 42, "is_bot": is_bot, "first_name": "User"},
+                "text": "hello",
+                **(
+                    {"sender_chat": {"id": chat_id, "type": "supergroup", "title": "Rates"}}
+                    if anonymous else {}
+                ),
+            },
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_group_user_messages_are_deleted_only_in_configured_group(monkeypatch):
+    bot = Bot("123456:ABC")
+    telegram_call = AsyncMock()
+    monkeypatch.setattr(Bot, "__call__", telegram_call)
+    dispatcher = Dispatcher()
+    dispatcher.include_router(
+        handlers.build_router(
+            MenuRepository(),
+            Settings(admin_telegram_id=ADMIN_ID, telegram_group_id=-10042),
+            SimpleNamespace(run_manual=AsyncMock()),
+        )
+    )
+    try:
+        await dispatcher.feed_update(bot, group_message_update(1, -10042))
+        await dispatcher.feed_update(bot, group_message_update(2, -10042, is_bot=True))
+        await dispatcher.feed_update(bot, group_message_update(3, -10042, is_bot=True, anonymous=True))
+        await dispatcher.feed_update(bot, group_message_update(4, -10099))
+        deleted = [
+            call.args[-1] for call in telegram_call.await_args_list
+            if isinstance(call.args[-1], DeleteMessage)
+        ]
+        assert [(method.chat_id, method.message_id) for method in deleted] == [
+            (-10042, 1), (-10042, 3)
+        ]
+    finally:
+        await bot.session.close()
+
+
 @pytest.mark.asyncio
 async def test_menu_edits_one_panel_and_removes_domain_input(monkeypatch):
     repository = MenuRepository()
