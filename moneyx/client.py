@@ -152,7 +152,7 @@ class MoneyXClient:
                     raise AuthenticationError("Money-X response contains no authenticated user")
                 self._use_mxi = include_mxi
                 return AuthResult(user=AuthUser.model_validate(user))
-            except AuthenticationError:
+            except (AuthenticationError, ForbiddenError):
                 if include_mxi or not self.mxi_token:
                     raise
         raise AuthenticationError("Money-X session has expired")

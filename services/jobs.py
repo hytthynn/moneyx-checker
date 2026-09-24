@@ -53,7 +53,7 @@ class JobService:
             run_id = await self.repository.claim_delivery(hour_key, self.config.telegram_group_id)
             if run_id is None:
                 return JobResult("duplicate", "this hourly window was already claimed")
-            return await self._execute(run_id)
+            return await self._execute(run_id, notify_admin=True)
 
     async def run_manual(self) -> JobResult:
         settings = await self.repository.get_settings()
@@ -73,9 +73,9 @@ class JobService:
             key = new_manual_delivery_key()
             run_id = await self.repository.claim_delivery(key, self.config.telegram_group_id)
             assert run_id is not None
-            return await self._execute(run_id)
+            return await self._execute(run_id, notify_admin=False)
 
-    async def _execute(self, run_id: int) -> JobResult:
+    async def _execute(self, run_id: int, *, notify_admin: bool) -> JobResult:
         settings = await self.repository.get_settings()
         secrets = await self._secrets()
         if not secrets.token or not secrets.auth_valid:
@@ -121,44 +121,57 @@ class JobService:
             await self.repository.finish_delivery(
                 run_id, "failed", "Money-X authentication expired"
             )
-            await self._alert_once(
-                "auth_expired", "Авторизация Money-X истекла. Выполните /auth_set."
-            )
+            if notify_admin:
+                await self._alert_once(
+                    "auth_expired", "Авторизация Money-X истекла. Выполните /auth_set."
+                )
             return JobResult("failed", "Авторизация Money-X истекла.")
         except ForbiddenError:
             await self.repository.finish_delivery(run_id, "failed", "Money-X returned forbidden")
-            await self._alert_once(
-                "moneyx_forbidden", "Money-X отклонил запрос (403). Защита не обходилась."
-            )
+            if notify_admin:
+                await self._alert_once(
+                    "moneyx_forbidden", "Money-X отклонил запрос (403). Защита не обходилась."
+                )
             return JobResult("failed", "Money-X отклонил запрос (403).")
         except (TelegramForbiddenError, TelegramBadRequest) as exc:
             safe = redact(exc)
             await self.repository.finish_delivery(run_id, "failed", safe)
             if "kicked" in safe.lower() or "chat not found" in safe.lower():
-                await self._alert_once(
-                    "group_unavailable",
-                    "Бот удалён из группы или группа из TELEGRAM_GROUP_ID недоступна.",
-                )
+                if notify_admin:
+                    await self._alert_once(
+                        "group_unavailable",
+                        "Бот удалён из группы или группа из TELEGRAM_GROUP_ID недоступна.",
+                    )
             else:
-                await self._alert_once(
-                    "group_delivery_failed", "Telegram не принял отчёт в группу или тему."
-                )
+                if notify_admin:
+                    await self._alert_once(
+                        "group_delivery_failed", "Telegram не принял отчёт в группу."
+                    )
             return JobResult("failed", "Telegram не принял сообщение в группу.")
         except TimeoutError:
             await self.repository.finish_delivery(
                 run_id, "failed", "overall Money-X deadline exceeded"
             )
-            await self._alert_once("job_timeout", "Проверка Money-X превысила общий лимит времени.")
+            if notify_admin:
+                await self._alert_once(
+                    "job_timeout", "Проверка Money-X превысила общий лимит времени."
+                )
             return JobResult("failed", "Превышен лимит времени проверки.")
         except Exception as exc:
             safe = redact(exc)
             logger.exception("Hourly job failed: %s", safe)
             await self.repository.finish_delivery(run_id, "failed", safe)
-            await self._alert_once(
-                "job_failed", f"Проверка Money-X завершилась ошибкой: {safe[:300]}"
-            )
+            if notify_admin:
+                await self._alert_once(
+                    "job_failed", f"Проверка Money-X завершилась ошибкой: {safe[:300]}"
+                )
             return JobResult(
-                "failed", "Проверка завершилась ошибкой; подробности отправлены администратору."
+                "failed",
+                (
+                    "Проверка завершилась ошибкой; подробности отправлены администратору."
+                    if notify_admin
+                    else "Проверка завершилась внутренней ошибкой. Подробности записаны в журнал."
+                ),
             )
 
     async def _alert_once(self, key: str, text: str) -> None:

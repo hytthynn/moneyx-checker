@@ -81,6 +81,28 @@ async def test_mxi_cookie_is_used_only_after_bearer_fails():
 
 
 @pytest.mark.asyncio
+async def test_mxi_cookie_is_used_after_bearer_is_forbidden():
+    seen_cookies: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        cookie = request.headers.get("cookie")
+        seen_cookies.append(cookie)
+        if not cookie:
+            return httpx.Response(403, json={})
+        return httpx.Response(200, json={"data": {"user": {"id": 1}}})
+
+    async with MoneyXClient(
+        "https://example.com",
+        token="token",
+        mxi_token="compat",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        await client.authenticate()
+
+    assert seen_cookies == [None, "mxi_token=compat"]
+
+
+@pytest.mark.asyncio
 async def test_expired_token_is_not_retried_without_mxi():
     calls = 0
 
