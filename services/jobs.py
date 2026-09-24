@@ -13,7 +13,15 @@ from config import Settings
 from moneyx.client import AuthenticationError, ForbiddenError, MoneyXClient
 from moneyx.rates import collect_rates
 from security import redact
-from services.notifier import format_report, send_report
+from services.notifier import (
+    MSK,
+    RateIncrease,
+    find_increases,
+    increases_html,
+    main_message_html,
+    send_increases,
+    upsert_main_message,
+)
 from storage.repository import Repository, SecretValues
 
 logger = logging.getLogger(__name__)
@@ -49,7 +57,7 @@ class JobService:
             key = new_delivery_key("cron")
             run_id = await self.repository.claim_delivery(key, self.config.telegram_group_id)
             assert run_id is not None
-            return await self._execute(run_id, notify_admin=True)
+            return await self._execute(run_id, notify_admin=True, send_increases_update=True)
 
     async def run_manual(self) -> JobResult:
         settings = await self.repository.get_settings()
@@ -69,9 +77,11 @@ class JobService:
             key = new_delivery_key("manual")
             run_id = await self.repository.claim_delivery(key, self.config.telegram_group_id)
             assert run_id is not None
-            return await self._execute(run_id, notify_admin=False)
+            return await self._execute(run_id, notify_admin=False, send_increases_update=False)
 
-    async def _execute(self, run_id: int, *, notify_admin: bool) -> JobResult:
+    async def _execute(
+        self, run_id: int, *, notify_admin: bool, send_increases_update: bool
+    ) -> JobResult:
         settings = await self.repository.get_settings()
         secrets = await self._secrets()
         if not secrets.token or not secrets.auth_valid:
@@ -93,13 +103,23 @@ class JobService:
                     ),
                     timeout=self.config.moneyx_total_deadline_seconds,
                 )
+            chat_id = self.config.telegram_group_id
             await self.repository.save_rates(run_id, settings.web_url, batch)
-            parts = format_report(batch, settings.web_url)
-            await send_report(
-                self.bot,
-                self.config.telegram_group_id,
-                parts,  # type: ignore[arg-type]
+            now = datetime.now(MSK)
+            known_id = settings.main_message_id if settings.main_chat_id == chat_id else None
+            main_id, created = await upsert_main_message(
+                self.bot, chat_id, known_id, main_message_html(batch, settings.web_url, now)
             )
+            if created:
+                await self.repository.set_main_message(chat_id, main_id)
+            increases: list[RateIncrease] = []
+            parts: list[str] = []
+            if send_increases_update:
+                previous = await self.repository.previous_rates(chat_id, "cron", run_id)
+                increases = find_increases(batch, previous)
+                if increases:
+                    parts = increases_html(increases, now)
+                    await send_increases(self.bot, chat_id, main_id, parts)
             await self.repository.finish_delivery(run_id, "sent")
             await self.repository.mark_auth_valid(secrets.token)
             for alert_key in (
@@ -111,7 +131,12 @@ class JobService:
                 "job_failed",
             ):
                 await self.repository.reset_alert(alert_key)
-            return JobResult("sent", f"Отправлено строк: {len(batch.rates)}", len(parts))
+            return JobResult(
+                "sent",
+                f"Главное сообщение обновлено, строк: {len(batch.rates)}"
+                + (f"; выросло курсов: {len(increases)}" if increases else ""),
+                len(parts),
+            )
         except AuthenticationError:
             await self.repository.mark_auth_invalid(secrets.token)
             await self.repository.finish_delivery(

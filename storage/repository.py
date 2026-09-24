@@ -4,9 +4,10 @@ import hashlib
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from urllib.parse import urlsplit
 
-from sqlalchemy import delete, insert, text, update
+from sqlalchemy import delete, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -153,6 +154,41 @@ class Repository:
                 .where(AppSettings.id == 1)
                 .values(last_check_at=datetime.now(UTC))
             )
+
+    async def set_main_message(self, chat_id: int, message_id: int) -> None:
+        async with self.sessions.begin() as session:
+            await session.execute(
+                update(AppSettings)
+                .where(AppSettings.id == 1)
+                .values(main_chat_id=chat_id, main_message_id=message_id)
+            )
+
+    async def previous_rates(
+        self, chat_id: int, kind: str, exclude_run_id: int
+    ) -> dict[tuple[str, str], Decimal]:
+        """Rates of the latest successfully sent run of this kind (e.g. "cron")."""
+        async with self.sessions() as session:
+            last_run_id = await session.scalar(
+                select(DeliveryRun.id)
+                .where(
+                    DeliveryRun.chat_id == chat_id,
+                    DeliveryRun.status == "sent",
+                    DeliveryRun.scheduled_hour.like(f"{kind}:%"),
+                    DeliveryRun.id != exclude_run_id,
+                )
+                .order_by(DeliveryRun.id.desc())
+                .limit(1)
+            )
+            if last_run_id is None:
+                return {}
+            rows = await session.execute(
+                select(RateSnapshot.currency, RateSnapshot.network, RateSnapshot.rate).where(
+                    RateSnapshot.delivery_run_id == last_run_id,
+                    RateSnapshot.status == "ok",
+                    RateSnapshot.rate.is_not(None),
+                )
+            )
+            return {(currency, network): rate for currency, network, rate in rows}
 
     async def save_secrets(self, token: str, mxi_token: str | None, *, valid: bool = True) -> None:
         async with self.sessions.begin() as session:

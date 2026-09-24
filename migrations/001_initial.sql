@@ -18,6 +18,10 @@ ALTER TABLE settings DROP COLUMN IF EXISTS chat_id;
 ALTER TABLE settings DROP COLUMN IF EXISTS message_thread_id;
 ALTER TABLE settings DROP COLUMN IF EXISTS group_alerted;
 
+-- Main group message that is edited in place on every run.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS main_chat_id BIGINT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS main_message_id BIGINT;
+
 CREATE TABLE IF NOT EXISTS secrets (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   token_encrypted TEXT,

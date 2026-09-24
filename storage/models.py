@@ -36,6 +36,8 @@ class AppSettings(Base):
         String(255), nullable=False, default="https://api.mxc1n.com"
     )
     last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    main_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    main_message_id: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
     )
