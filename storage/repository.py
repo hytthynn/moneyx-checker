@@ -267,6 +267,10 @@ class Repository:
                 )
             )
 
+    async def clear_pending(self, admin_id: int) -> None:
+        async with self.sessions.begin() as session:
+            await session.execute(delete(PendingAction).where(PendingAction.admin_id == admin_id))
+
     async def pop_pending(self, admin_id: int) -> PendingValue | None:
         async with self.sessions.begin() as session:
             row = await session.get(PendingAction, admin_id)

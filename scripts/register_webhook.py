@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aiogram import Bot
+from aiogram.types import BotCommand
 
 from asyncio_compat import run
 from config import get_settings
@@ -11,6 +12,7 @@ async def main() -> None:
     if not config.app_base_url:
         raise SystemExit("APP_BASE_URL is required")
     async with Bot(config.telegram_bot_token) as bot:
+        await bot.set_my_commands([BotCommand(command="start", description="Открыть управление")])
         await bot.set_webhook(
             url=f"{config.app_base_url.rstrip('/')}/api/telegram/webhook",
             secret_token=config.telegram_webhook_secret,

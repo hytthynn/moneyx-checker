@@ -144,7 +144,8 @@ class JobService:
             )
             if notify_admin:
                 await self._alert_once(
-                    "auth_expired", "Авторизация Money-X истекла. Выполните /auth_set."
+                    "auth_expired",
+                    "Авторизация Money-X истекла. Откройте /start → «Изменить авторизацию».",
                 )
             return JobResult("failed", "Авторизация Money-X истекла.")
         except ForbiddenError:

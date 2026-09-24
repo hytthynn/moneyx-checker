@@ -6,6 +6,8 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from aiogram.types import BotCommand
+
 from asyncio_compat import run
 from runtime import get_runtime
 
@@ -33,6 +35,7 @@ async def main() -> None:
     scheduler = asyncio.create_task(scheduler_loop())
     try:
         await runtime.bot.delete_webhook(drop_pending_updates=False)
+        await runtime.bot.set_my_commands([BotCommand(command="start", description="Открыть управление")])
         await runtime.dispatcher.start_polling(
             runtime.bot, allowed_updates=["message", "callback_query"]
         )
