@@ -1,3 +1,4 @@
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -21,6 +22,7 @@ class MenuRepository:
     def __init__(self):
         self.pending = None
         self.domain = None
+        self.threshold = Decimal("0.00")
         self.secrets = SecretValues("old-token", None, True, None)
 
     async def clear_pending(self, admin_id):
@@ -34,13 +36,20 @@ class MenuRepository:
         return value
 
     async def get_settings(self):
-        return SimpleNamespace(web_url="https://old.example", api_url="https://api.old.example")
+        return SimpleNamespace(
+            web_url="https://old.example",
+            api_url="https://api.old.example",
+            increase_threshold_percent=self.threshold,
+        )
 
     async def get_secrets(self):
         return self.secrets
 
     async def set_domain(self, web_url, api_url):
         self.domain = (web_url, api_url)
+
+    async def set_increase_threshold(self, percent):
+        self.threshold = percent
 
     async def save_secrets(self, token, mxi_token):
         self.secrets = SecretValues(token, mxi_token, True, None)
@@ -224,3 +233,37 @@ def test_status_escapes_external_values_and_exposes_no_token():
     assert "&amp;" in html
     assert "Авторизация" in html
     assert "token" not in html
+
+
+@pytest.mark.asyncio
+async def test_threshold_is_saved_from_inline_panel_and_input_is_deleted(monkeypatch):
+    repository = MenuRepository()
+    bot = Bot("123456:ABC")
+    telegram_call = AsyncMock()
+    monkeypatch.setattr(Bot, "__call__", telegram_call)
+    dispatcher = Dispatcher()
+    dispatcher.include_router(
+        handlers.build_router(
+            repository, Settings(_env_file=None, admin_telegram_id=ADMIN_ID),
+            SimpleNamespace(run_manual=AsyncMock()),
+        )
+    )
+    try:
+        await dispatcher.feed_update(bot, callback_update(1, "menu:threshold"))
+        await dispatcher.feed_update(bot, message_update(2, 2, "0,5%"))
+        methods = [call.args[-1] for call in telegram_call.await_args_list]
+        assert repository.threshold == Decimal("0.5")
+        assert sum(isinstance(method, DeleteMessage) for method in methods) == 1
+        assert not any(isinstance(method, SendMessage) for method in methods)
+        edits = [method for method in methods if isinstance(method, EditMessageText)]
+        assert all(method.message_id == PANEL_ID for method in edits)
+        assert "Порог сохранён" in edits[-1].text
+        assert "+0.5%" in edits[-1].text
+    finally:
+        await bot.session.close()
+
+
+@pytest.mark.parametrize("raw", ["-0.5", "100.01", "0.001", "NaN", "abc"])
+def test_invalid_threshold_is_rejected(raw):
+    with pytest.raises(ValueError):
+        handlers.parse_threshold_percent(raw)

@@ -64,35 +64,40 @@ class RateIncrease:
 
 
 def find_increases(
-    batch: RateBatch, previous: dict[tuple[str, str], Decimal]
+    batch: RateBatch,
+    previous: dict[tuple[str, str], Decimal],
+    minimum_percent: Decimal = Decimal("0"),
 ) -> list[RateIncrease]:
-    """Pairs whose visible (3-decimal) rate grew since the previous run."""
+    """Pairs whose visible rate rose by at least the configured percentage."""
     result: list[RateIncrease] = []
     for rate in batch.rates:
         before = previous.get((rate.currency, rate.network))
         if before is None:
             continue
         old, new = visible_rate(before), visible_rate(rate.rate)
-        if new > old:
+        percent = percent_increase(old, new)
+        if percent is not None and percent > 0 and percent >= minimum_percent:
             result.append(RateIncrease(rate.currency, rate.network, old, new))
     return result
+
+
+def percent_increase(previous: Decimal, current: Decimal) -> Decimal | None:
+    old, new = visible_rate(previous), visible_rate(current)
+    return (new - old) / old * 100 if old > 0 else None
 
 
 def increases_html(increases: list[RateIncrease], now: datetime | None = None) -> list[str]:
     local_now = (now or datetime.now(MSK)).astimezone(MSK)
     lines = ["📈 <b>Курс вырос</b>", ""]
     for item in increases:
-        previous = visible_rate(item.previous)
         current = visible_rate(item.current)
-        difference = current - previous
-        percent = (
-            f"+{(difference / previous * 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):f}%"
-            if previous > 0
-            else "н/д"
-        )
+        percent = percent_increase(item.previous, item.current)
+        if percent is None:
+            continue
+        percent_text = percent.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         lines.append(
             f"{_pair_html(item.currency, item.network)} — <code>{current:f}</code> ₽"
-            f" <i>(+{difference:f} · {percent})</i>"
+            f" <i>(+{percent_text:f}%)</i>"
         )
     lines.extend(["", f"🕒 {local_now:%d.%m.%Y %H:%M} MSK"])
     return split_lines(lines)

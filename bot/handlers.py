@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from decimal import Decimal, InvalidOperation
 from html import escape
 
 from aiogram import F, Router
@@ -41,6 +42,7 @@ MAIN_KEYBOARD = keyboard(
     (("📊 Статус", "menu:status"), ("🔄 Проверить курс", "menu:check")),
     (("🌐 Изменить домен", "menu:domain"),),
     (("🔐 Изменить авторизацию", "menu:auth"),),
+    (("📈 Порог роста", "menu:threshold"),),
 )
 BACK_KEYBOARD = keyboard((("← В меню", "menu:home"),))
 CANCEL_KEYBOARD = keyboard((("✕ Отмена", "menu:cancel"),))
@@ -66,6 +68,23 @@ def status_text(web_url: str, api_url: str, auth_valid: bool) -> str:
 
 def result_text(title: str, detail: str) -> str:
     return f"<b>{title}</b>\n\n{escape(detail)}"
+
+
+def format_percent(value: Decimal) -> str:
+    return f"{value.normalize():f}%"
+
+
+def parse_threshold_percent(raw: str) -> Decimal:
+    value = raw.strip().removesuffix("%").strip().replace(",", ".")
+    try:
+        percent = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError("Укажите число, например 0.5 или 0,5%.") from exc
+    if not percent.is_finite() or not Decimal("0") <= percent <= Decimal("100"):
+        raise ValueError("Порог должен быть от 0 до 100%.")
+    if percent != percent.quantize(Decimal("0.01")):
+        raise ValueError("Допустимо не более двух знаков после запятой.")
+    return percent
 
 
 def pending_payload(message_id: int, token: str | None = None) -> str:
@@ -211,6 +230,30 @@ def build_router(repository: Repository, config: Settings, jobs: JobService) -> 
             CANCEL_KEYBOARD,
         )
 
+    @private_router.callback_query(F.data == "menu:threshold", admin)
+    async def threshold(callback: CallbackQuery) -> None:
+        if not isinstance(callback.message, Message):
+            await callback.answer()
+            return
+        state = await repository.get_settings()
+        await repository.put_pending(
+            config.admin_telegram_id,
+            "threshold",
+            payload=pending_payload(callback.message.message_id),
+        )
+        await callback.answer()
+        await edit_message(
+            callback.message,
+            "<b>📈 Порог роста курса</b>\n\n"
+            f"Текущий порог: <b>{format_percent(state.increase_threshold_percent)}</b>\n\n"
+            "Отправьте новый порог, например <code>0.5%</code>. "
+            "В уведомления попадут монеты с ростом от этого значения. "
+            "Отправленное сообщение будет удалено.\n\n"
+            "<i>От 0 до 100%, не более двух знаков после запятой. "
+            "Ожидание ввода: 10 минут.</i>",
+            CANCEL_KEYBOARD,
+        )
+
     @private_router.callback_query(F.data == "menu:cancel", admin)
     async def cancel(callback: CallbackQuery) -> None:
         await repository.clear_pending(config.admin_telegram_id)
@@ -238,6 +281,34 @@ def build_router(repository: Repository, config: Settings, jobs: JobService) -> 
                 message,
                 panel_id,
                 result_text("⚠️ Неверный ввод", "Отправьте текст длиной от 1 до 8192 символов."),
+                BACK_KEYBOARD,
+            )
+            return
+
+        if pending.action == "threshold":
+            try:
+                percent = parse_threshold_percent(value)
+            except ValueError as exc:
+                await repository.put_pending(
+                    config.admin_telegram_id,
+                    "threshold",
+                    payload=pending_payload(panel_id),
+                )
+                await edit_panel(
+                    message,
+                    panel_id,
+                    result_text("⚠️ Неверный порог", str(exc) + " Отправьте значение ещё раз."),
+                    CANCEL_KEYBOARD,
+                )
+                return
+            await repository.set_increase_threshold(percent)
+            await edit_panel(
+                message,
+                panel_id,
+                result_text(
+                    "✅ Порог сохранён",
+                    f"Уведомления о росте будут приходить от +{format_percent(percent)}.",
+                ),
                 BACK_KEYBOARD,
             )
             return

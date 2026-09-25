@@ -38,6 +38,9 @@ class AppSettings(Base):
     last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     main_chat_id: Mapped[int | None] = mapped_column(BigInteger)
     main_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    increase_threshold_percent: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0.00")
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
     )

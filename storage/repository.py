@@ -147,6 +147,14 @@ class Repository:
                 .values(web_url=web_url, api_url=api_url, updated_at=datetime.now(UTC))
             )
 
+    async def set_increase_threshold(self, percent: Decimal) -> None:
+        async with self.sessions.begin() as session:
+            await session.execute(
+                update(AppSettings)
+                .where(AppSettings.id == 1)
+                .values(increase_threshold_percent=percent, updated_at=datetime.now(UTC))
+            )
+
     async def mark_check(self) -> None:
         async with self.sessions.begin() as session:
             await session.execute(

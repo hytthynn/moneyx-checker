@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   web_url VARCHAR(255) NOT NULL,
   api_url VARCHAR(255) NOT NULL,
+  increase_threshold_percent NUMERIC(5, 2) NOT NULL DEFAULT 0,
   last_check_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -21,6 +22,7 @@ ALTER TABLE settings DROP COLUMN IF EXISTS group_alerted;
 -- Main group message that is edited in place on every run.
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS main_chat_id BIGINT;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS main_message_id BIGINT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS increase_threshold_percent NUMERIC(5, 2) NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS secrets (
   id INTEGER PRIMARY KEY CHECK (id = 1),

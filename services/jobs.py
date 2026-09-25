@@ -116,7 +116,9 @@ class JobService:
             parts: list[str] = []
             if send_increases_update:
                 previous = await self.repository.previous_rates(chat_id, "cron", run_id)
-                increases = find_increases(batch, previous)
+                increases = find_increases(
+                    batch, previous, settings.increase_threshold_percent
+                )
                 if increases:
                     parts = increases_html(increases, now)
                     await send_increases(self.bot, chat_id, main_id, parts)
